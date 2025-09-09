@@ -36,17 +36,23 @@ public with sharing class DummyJSONCallout {
 
 	public static void getDummyJSONUserFromId(String dummyUserId) {
 		// Create HTTP request to send.
-
+		HttpRequest req = new HttpRequest();
 		// Set the endpoint URL. Use direct URL or for best practices use Named Credential.
-
+		req.setEndpoint('https://dummyjson.com/user/' + dummyUserId);
 		// Set the HTTP method to GET.
+		req.setMethod('GET');
 
 		// Send the HTTP request and get the response.
+		Http http = new Http();
+		HttpResponse res = http.send(req);
 
 		// If the HTTP response code is successful, parse the JSON response and update the contact.
-		Contact cont = null;
-		upsert cont DummyJSON_Id__c; //insert/update from the JSON response using the external id (dummyUserId)
+		If (res.getStatusCode() == 200) {
+			Contact cont = createContactFromJson(res.getBody(), dummyUserId);
+			upsert cont DummyJSON_Id__c; //insert/update from the JSON response using the external id (dummyUserId)
+		}	
 	}
+		
 
 	/* 
 	 * Question 2
@@ -64,20 +70,51 @@ public with sharing class DummyJSONCallout {
      * @return Contact The Salesforce Contact object populated with details from the JSON string.
      */
 	@TestVisible // Allows test class to see this method. Since it is private, it would not be visible otherwise.
-	private static Contact createContactFromJson(String jsonResponse) {
+	private static Contact createContactFromJson(String jsonResponse, String externalId) {
 		// Deserialize the JSON string into map of primitive data types.
+		Map<String, Object> resUserData = (Map<String, Object>) JSON.deserializeUntyped(jsonResponse);
 
 		// Create a new contact from the JSON response.
+		Contact conFromUser = new Contact();
+		conFromUser.DummyJSON_Id__c = externalId;
 
 		// Set the contact fields from the JSON response.
-
+		conFromUser.Email = (String) resUserData.get('email');
+		conFromUser.Phone = (String) resUserData.get('phone');
+		conFromUser.Birthdate = (Date) resUserData.get('birthDate');
+		
 		// Deserialize the address from the JSON response.
-
 		// Set the address fields on the contact.
-
-		return null;
+		conFromUser.MailingStreet = (String) resUserData.get('address').get('address');
+		conFromUser.MailingCity = (String) resUserData.get('address').get('city');
+		conFromUser.MailingPostalCode = (String) resUserData.get('address').get('postalCode');
+		conFromUser.MailingState = (String) resUserData.get('address').get('state');
+		conFromUser.MailingCountry = (String) resUserData.get('address').get('country');
+		
+		return conFromUser;
 	}
-
+		/*
+		It is not accepting this line: conFromUser.MailingStreet = (String) resUserData.get('address').get('address'); 
+		The error message says the Method does not exist or incorrect signature: void get(string) fom the type object.EditThe error is happening because resUserData.get('address') returns an Object, and Object doesn't have a get() method. You need to cast it to a Map first before you can call get() on it.
+		The problem:
+		apex// This won't work - Object doesn't have get() method
+		conFromUser.MailingStreet = (String) resUserData.get('address').get('address');
+		The solution - cast the nested object to Map:
+		apex// Cast the address object to Map<String, Object> first
+		conFromUser.MailingStreet = (String) ((Map<String, Object>) resUserData.get('address')).get('address');
+		Or do it in two steps for clarity:
+		apex// Step 1: Get the address object and cast it to Map
+		Map<String, Object> addressObj = (Map<String, Object>) resUserData.get('address');
+		// Step 2: Get the street address from the address object
+		conFromUser.MailingStreet = (String) addressObj.get('address');
+		Apply this same pattern to all nested address fields:
+		apexMap<String, Object> addressObj = (Map<String, Object>) resUserData.get('address');
+		conFromUser.MailingStreet = (String) addressObj.get('address');
+		conFromUser.MailingCity = (String) addressObj.get('city');
+		conFromUser.MailingState = (String) addressObj.get('state');
+		conFromUser.MailingPostalCode = (String) addressObj.get('postalCode');
+		conFromUser.MailingCountry = (String) addressObj.get('country');
+		*/
 	/* 
 	 * Question 3
      * Sends Contact information to an external system https://dummyjson.com/users/add ('DummyJsonUser') to create or update a user based on the provided Salesforce Contact ID.
