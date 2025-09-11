@@ -34,19 +34,26 @@ public with sharing class DummyJSONCallout {
      * @param dummyUserId The ID of the user in the external system to fetch data for.
      */
 
+	@future(callout = true)
 	public static void getDummyJSONUserFromId(String dummyUserId) {
 		// Create HTTP request to send.
-
+		HttpRequest req = new HttpRequest();
 		// Set the endpoint URL. Use direct URL or for best practices use Named Credential.
-
+		req.setEndpoint('https://dummyjson.com/user/' + dummyUserId);
 		// Set the HTTP method to GET.
+		req.setMethod('GET');
 
 		// Send the HTTP request and get the response.
+		Http http = new Http();
+		HttpResponse res = http.send(req);
 
 		// If the HTTP response code is successful, parse the JSON response and update the contact.
-		Contact cont = null;
-		upsert cont DummyJSON_Id__c; //insert/update from the JSON response using the external id (dummyUserId)
+		if (res.getStatusCode() == 200) {
+			Contact cont = createContactFromJson(res.getBody(), dummyUserId);
+			upsert cont DummyJSON_Id__c; //insert/update from the JSON response using the external id (dummyUserId)
+		}	
 	}
+		
 
 	/* 
 	 * Question 2
@@ -64,20 +71,32 @@ public with sharing class DummyJSONCallout {
      * @return Contact The Salesforce Contact object populated with details from the JSON string.
      */
 	@TestVisible // Allows test class to see this method. Since it is private, it would not be visible otherwise.
-	private static Contact createContactFromJson(String jsonResponse) {
+	private static Contact createContactFromJson(String jsonResponse, String externalId) {
 		// Deserialize the JSON string into map of primitive data types.
+		Map<String, Object> resUserData = (Map<String, Object>) JSON.deserializeUntyped(jsonResponse);
 
 		// Create a new contact from the JSON response.
+		Contact conFromUser = new Contact();
+		conFromUser.DummyJSON_Id__c = externalId;
 
 		// Set the contact fields from the JSON response.
-
+		conFromUser.Email = (String) resUserData.get('email');
+		conFromUser.Phone = (String) resUserData.get('phone');
+		conFromUser.Birthdate = (Date) resUserData.get('birthDate');
+		
 		// Deserialize the address from the JSON response.
+		Map<String, Object> userAddress = (Map<String, Object>) resUserData.get('address');
 
 		// Set the address fields on the contact.
-
-		return null;
+		conFromUser.MailingStreet = (String) resUserData.get('address');
+		conFromUser.MailingCity = (String) resUserData.get('city');
+		conFromUser.MailingPostalCode = (String) resUserData.get('postalCode');
+		conFromUser.MailingState = (String) resUserData.get('state');
+		conFromUser.MailingCountry = (String) resUserData.get('country');
+		
+		return conFromUser;
 	}
-
+		
 	/* 
 	 * Question 3
      * Sends Contact information to an external system https://dummyjson.com/users/add ('DummyJsonUser') to create or update a user based on the provided Salesforce Contact ID.
@@ -92,18 +111,29 @@ public with sharing class DummyJSONCallout {
      * @param contactId The Salesforce Contact ID used to generate the JSON payload for the external system.
      */
 	
+	@future(callout = true) //moves the execution to a different context where callouts are permitted.
 	public static void postCreateDummyJSONUser(String contactId) {
 		// Create HTTP request to send.
+		HttpRequest sendReq = new HttpRequest();
 
 		// Set the endpoint URL. Use direct URL or for best practices use Named Credential.
+		sendReq.setEndpoint('https://dummyjson.com/user/add');
 
 		// Set the HTTP method to POST.
-
+		sendReq.setMethod('POST');	
+		
 		// Set the body using generateDummyJsonUserPayload method.
-
+		sendReq.setBody(generateDummyJsonUserPayload(contactId));
+		
 		// Send the HTTP request and get the response.
-
+		Http http = new Http();
+		HttpResponse postRes = http.send(sendReq);
+		
 		// If the HTTP response code is successful, update the contact.
+		if (postRes.getStatusCode() >= 200 && postRes.getStatusCode() < 300) {
+			Contact contToUpdate = new Contact(Id = contactId, DummyJSON_Last_Updated__c = Datetime.now());
+			update contToUpdate;
+		}
 	}
 
 	/*
@@ -124,13 +154,26 @@ public with sharing class DummyJSONCallout {
 	@TestVisible // Allows test class to see this method. Since it is private, it would not be visible otherwise.
 	private static String generateDummyJsonUserPayload(String contactId) {
 		// Query the contact to get the field values to generate the JSON payload.
-
+		Contact contactToPost = [
+			SELECT Id, FirstName, LastName, Email, Phone
+			FROM Contact
+			WHERE Id = :contactId
+		];
+		
 		// Create a map of the field values.
+		Map<String, Object> sfToJSON = new Map<String, Object>{
+			'salesforceId' => contactToPost.Id,
+			'firstName' => contactToPost.FirstName != null ? contactToPost.FirstName : 'Unknown',
+        	'lastName' => contactToPost.LastName != null ? contactToPost.LastName : 'Unknown', 
+        	'email' => contactToPost.Email != null ? contactToPost.Email : 'unknown@email.com',
+        	'phone' => contactToPost.Phone != null ? contactToPost.Phone : 'Unknown'
+		};
 
 		// Serialize the map into a JSON string.
+		return JSON.serialize(sfToJSON);
+
 		// Make sure to check that required contacts fields have a value. Default the value to unknown if it does not exists.
 		// Integration data can change over time. It is a best practice to add safeguards/validation to ensure the integration does not break.
 
-		return null;
 	}
 }
