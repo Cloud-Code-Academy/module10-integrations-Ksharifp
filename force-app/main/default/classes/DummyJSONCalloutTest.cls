@@ -116,7 +116,8 @@ public with sharing class DummyJSONCalloutTest {
 	static void testCreateContactFromJson() {
 		// JSON string that represents the response data
 		String jsonResponse = DummyJSONCalloutMockGenerator.DUMMY_JSON_USER_PAYLOAD;
-
+		String externalId = '1';
+		
 		// Call the method
 		Contact cont = DummyJSONCallout.createContactFromJson(jsonResponse, externalId);
 
