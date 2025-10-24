@@ -36,10 +36,13 @@ public with sharing class DummyJSONCallout {
 
 	@future(callout = true)
 	public static void getDummyJSONUserFromId(String dummyUserId) {
+
 		// Create HTTP request to send.
 		HttpRequest req = new HttpRequest();
+
 		// Set the endpoint URL. Use direct URL or for best practices use Named Credential.
-		req.setEndpoint('https://dummyjson.com/user/' + dummyUserId);
+		req.setEndpoint('https://dummyjson.com/users/' + dummyUserId);
+
 		// Set the HTTP method to GET.
 		req.setMethod('GET');
 
@@ -51,7 +54,9 @@ public with sharing class DummyJSONCallout {
 		if (res.getStatusCode() == 200) {
 			Contact cont = createContactFromJson(res.getBody(), dummyUserId);
 			upsert cont DummyJSON_Id__c; //insert/update from the JSON response using the external id (dummyUserId)
-		}	
+		}	else { //what if other errors happened.
+			System.debug('Error: ' + res.getStatusCode() + ' ' + res.getStatus());
+		}
 	}
 		
 
@@ -72,6 +77,8 @@ public with sharing class DummyJSONCallout {
      */
 	@TestVisible // Allows test class to see this method. Since it is private, it would not be visible otherwise.
 	private static Contact createContactFromJson(String jsonResponse, String externalId) {
+		// This method is not bulkified.?!
+
 		// Deserialize the JSON string into map of primitive data types.
 		Map<String, Object> resUserData = (Map<String, Object>) JSON.deserializeUntyped(jsonResponse);
 
@@ -80,19 +87,27 @@ public with sharing class DummyJSONCallout {
 		conFromUser.DummyJSON_Id__c = externalId;
 
 		// Set the contact fields from the JSON response.
+		conFromUser.FirstName = (String) resUserData.get('firstName');
+		conFromUser.LastName = (String) resUserData.get('lastName');
 		conFromUser.Email = (String) resUserData.get('email');
 		conFromUser.Phone = (String) resUserData.get('phone');
-		conFromUser.Birthdate = (Date) resUserData.get('birthDate');
+
+		//the JSON response for birthdate is in yyyy-mm-dd format.
+		String birthDateStr = (String) resUserData.get('birthDate');
+		if (birthDateStr != null && birthDateStr != '') {
+			conFromUser.Birthdate = Date.valueOf(birthDateStr);
+		}
+	
 		
 		// Deserialize the address from the JSON response.
 		Map<String, Object> userAddress = (Map<String, Object>) resUserData.get('address');
 
 		// Set the address fields on the contact.
-		conFromUser.MailingStreet = (String) resUserData.get('address');
-		conFromUser.MailingCity = (String) resUserData.get('city');
-		conFromUser.MailingPostalCode = (String) resUserData.get('postalCode');
-		conFromUser.MailingState = (String) resUserData.get('state');
-		conFromUser.MailingCountry = (String) resUserData.get('country');
+		conFromUser.MailingStreet = (String) userAddress.get('address');
+		conFromUser.MailingCity = (String) userAddress.get('city');
+		conFromUser.MailingPostalCode = (String) userAddress.get('postalCode');
+		conFromUser.MailingState = (String) userAddress.get('state');
+		conFromUser.MailingCountry = (String) userAddress.get('country');
 		
 		return conFromUser;
 	}
@@ -117,11 +132,14 @@ public with sharing class DummyJSONCallout {
 		HttpRequest sendReq = new HttpRequest();
 
 		// Set the endpoint URL. Use direct URL or for best practices use Named Credential.
-		sendReq.setEndpoint('https://dummyjson.com/user/add');
+		sendReq.setEndpoint('https://dummyjson.com/users/add');
 
 		// Set the HTTP method to POST.
 		sendReq.setMethod('POST');	
 		
+		// Set the content type to JSON.
+		sendReq.setHeader('Content-Type', 'application/json');
+
 		// Set the body using generateDummyJsonUserPayload method.
 		sendReq.setBody(generateDummyJsonUserPayload(contactId));
 		
@@ -133,6 +151,8 @@ public with sharing class DummyJSONCallout {
 		if (postRes.getStatusCode() >= 200 && postRes.getStatusCode() < 300) {
 			Contact contToUpdate = new Contact(Id = contactId, DummyJSON_Last_Updated__c = Datetime.now());
 			update contToUpdate;
+		} else {
+			System.debug ('Error: ' + postRes.getStatusCode() + ' ' + postRes.getStatus());
 		}
 	}
 
@@ -154,12 +174,20 @@ public with sharing class DummyJSONCallout {
 	@TestVisible // Allows test class to see this method. Since it is private, it would not be visible otherwise.
 	private static String generateDummyJsonUserPayload(String contactId) {
 		// Query the contact to get the field values to generate the JSON payload.
-		Contact contactToPost = [
+		List <Contact> contacts = [
 			SELECT Id, FirstName, LastName, Email, Phone
 			FROM Contact
 			WHERE Id = :contactId
+			Limit 1
 		];
 		
+		if (contacts.isEmpty()) {
+			throw new IllegalArgumentException('Contact not found: ' + contactId);
+		}
+
+		// create a Contact record from the queried list
+		Contact contactToPost = contacts[0];
+
 		// Create a map of the field values.
 		Map<String, Object> sfToJSON = new Map<String, Object>{
 			'salesforceId' => contactToPost.Id,
